@@ -1,5 +1,5 @@
 import { google, searchconsole_v1, webmasters_v3 } from 'googleapis';
-import { GoogleAuth } from 'google-auth-library';
+import { GoogleAuth, OAuth2Client } from 'google-auth-library';
 
 type SearchanalyticsQueryRequest =
   webmasters_v3.Params$Resource$Searchanalytics$Query['requestBody'];
@@ -10,37 +10,64 @@ type IndexInspectRequest =
   searchconsole_v1.Params$Resource$Urlinspection$Index$Inspect['requestBody'];
 
 export class SearchConsoleService {
-  private auth: GoogleAuth;
+  private auth: GoogleAuth | null = null;
+  private accessToken: string | null = null;
 
-  constructor(credentials: string) {
-    this.auth = new google.auth.GoogleAuth({
-      keyFile: credentials,
-      scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
-    });
+  /**
+   * Create a SearchConsoleService
+   * @param credentialsOrToken - Either a path to a service account JSON file, or an OAuth access token
+   * @param isAccessToken - If true, treat the first param as an access token instead of a keyfile path
+   */
+  constructor(credentialsOrToken: string, isAccessToken: boolean = false) {
+    if (isAccessToken) {
+      this.accessToken = credentialsOrToken;
+    } else {
+      this.auth = new google.auth.GoogleAuth({
+        keyFile: credentialsOrToken,
+        scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
+      });
+    }
+  }
+
+  private async getAuthClient() {
+    if (this.accessToken) {
+      // Create OAuth2 client with access token
+      const oauth2Client = new OAuth2Client();
+      oauth2Client.setCredentials({ access_token: this.accessToken });
+      return oauth2Client;
+    } else if (this.auth) {
+      return this.auth.getClient();
+    }
+    throw new Error('No authentication configured');
   }
 
   private async getWebmasters() {
-    const authClient = await this.auth.getClient();
+    const authClient = await this.getAuthClient();
     return google.webmasters({
       version: 'v3',
-      auth: authClient,
+      auth: authClient as any,
     } as webmasters_v3.Options);
   }
 
   private async getSearchConsole() {
-    const authClient = await this.auth.getClient();
+    const authClient = await this.getAuthClient();
     return google.searchconsole({
       version: 'v1',
-      auth: authClient,
+      auth: authClient as any,
     } as searchconsole_v1.Options);
   }
 
   private normalizeUrl(url: string): string {
-    const parsedUrl = new URL(url);
-    if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
-      return `sc-domain:${parsedUrl.hostname}`;
+    try {
+      const parsedUrl = new URL(url);
+      if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+        return `sc-domain:${parsedUrl.hostname}`;
+      }
+      return `https://${url}`;
+    } catch {
+      // If URL parsing fails, try sc-domain format
+      return `sc-domain:${url}`;
     }
-    return `https://${url}`;
   }
 
   private async handlePermissionError<T>(
@@ -72,7 +99,7 @@ export class SearchConsoleService {
    * - Quick wins detection
    */
   async enhancedSearchAnalytics(
-    siteUrl: string, 
+    siteUrl: string,
     requestBody: SearchanalyticsQueryRequest,
     options: {
       regexFilter?: string;
@@ -107,7 +134,7 @@ export class SearchConsoleService {
 
     // Execute enhanced search analytics
     const result = await this.searchAnalytics(siteUrl, requestBody);
-    
+
     // Apply quick wins detection if enabled
     if (options.enableQuickWins && result.data.rows) {
       const quickWins = this.detectQuickWins(result.data.rows, options.quickWinsThresholds);
@@ -133,7 +160,7 @@ export class SearchConsoleService {
    * Identifies SEO optimization opportunities
    */
   private detectQuickWins(
-    rows: any[], 
+    rows: any[],
     thresholds: {
       minImpressions?: number;
       maxCtr?: number;
