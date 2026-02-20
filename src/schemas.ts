@@ -1,5 +1,55 @@
 import { z } from 'zod';
 
+/**
+ * Parse relative date strings (like GA4 uses) to YYYY-MM-DD format
+ * Supports: "today", "yesterday", "NdaysAgo" (e.g., "30daysAgo", "7daysAgo")
+ */
+function parseRelativeDate(dateStr: string): string {
+  // Already in YYYY-MM-DD format
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return dateStr;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const lower = dateStr.toLowerCase();
+
+  if (lower === 'today') {
+    return formatDate(today);
+  }
+
+  if (lower === 'yesterday') {
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return formatDate(yesterday);
+  }
+
+  // Match patterns like "7daysAgo", "30daysAgo"
+  const daysAgoMatch = lower.match(/^(\d+)daysago$/);
+  if (daysAgoMatch) {
+    const daysAgo = parseInt(daysAgoMatch[1], 10);
+    const pastDate = new Date(today);
+    pastDate.setDate(pastDate.getDate() - daysAgo);
+    return formatDate(pastDate);
+  }
+
+  // If it doesn't match any pattern, throw an error
+  throw new Error(
+    `'${dateStr}' is not a valid date string. Use YYYY-MM-DD format or relative dates like 'today', 'yesterday', '7daysAgo', '30daysAgo'.`
+  );
+}
+
+function formatDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Zod schema for date strings that accepts relative dates
+const dateStringSchema = z.string().transform(parseRelativeDate);
+
 export const GSCBaseSchema = z.object({
   siteUrl: z
     .string()
@@ -9,8 +59,8 @@ export const GSCBaseSchema = z.object({
 });
 
 export const SearchAnalyticsSchema = GSCBaseSchema.extend({
-  startDate: z.string().describe('Start date in YYYY-MM-DD format'),
-  endDate: z.string().describe('End date in YYYY-MM-DD format'),
+  startDate: dateStringSchema.describe('Start date (YYYY-MM-DD or relative: today, yesterday, 7daysAgo, 30daysAgo)'),
+  endDate: dateStringSchema.describe('End date (YYYY-MM-DD or relative: today, yesterday, 7daysAgo, 30daysAgo)'),
   dimensions: z
     .string()
     .transform((val) => val.split(',').map((d) => d.trim()))
@@ -92,8 +142,8 @@ export const SubmitSitemapSchema = z.object({
 
 // Enhanced Quick Wins Detection Schema
 export const QuickWinsDetectionSchema = GSCBaseSchema.extend({
-  startDate: z.string().describe('Start date in YYYY-MM-DD format'),
-  endDate: z.string().describe('End date in YYYY-MM-DD format'),
+  startDate: dateStringSchema.describe('Start date (YYYY-MM-DD or relative: today, yesterday, 7daysAgo, 30daysAgo)'),
+  endDate: dateStringSchema.describe('End date (YYYY-MM-DD or relative: today, yesterday, 7daysAgo, 30daysAgo)'),
   minImpressions: z.number().default(50).describe('Minimum impressions threshold for quick wins'),
   maxCtr: z.number().default(2.0).describe('Maximum CTR percentage for quick wins detection'),
   positionRangeMin: z.number().default(4).describe('Minimum position for quick wins (default: 4)'),
